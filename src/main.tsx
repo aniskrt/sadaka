@@ -43,7 +43,14 @@ if ('serviceWorker' in navigator) {
       }));
       
     } catch (registrationError) {
-      console.error('SW registration failed: ', registrationError);
+      // تحسين معالجة الأخطاء للبيئات التي لا تدعم Service Workers
+      const errorMessage = registrationError instanceof Error ? registrationError.message : String(registrationError);
+      
+      if (errorMessage.includes('StackBlitz') || errorMessage.includes('not yet supported')) {
+        console.info('ℹ️ Service Workers are not supported in this development environment (StackBlitz). This is expected and the app will work normally without offline features.');
+      } else {
+        console.error('SW registration failed: ', registrationError);
+      }
       
       // fallback: تهيئة خدمات أساسية بدون service worker
       try {
@@ -51,7 +58,7 @@ if ('serviceWorker' in navigator) {
         await enhancedNotificationService.requestPermission();
         console.log('Basic notification service initialized as fallback');
       } catch (fallbackError) {
-        console.error('Fallback initialization failed:', fallbackError);
+        console.warn('Fallback initialization failed (this is OK in development environments):', fallbackError);
       }
     }
   });
@@ -111,6 +118,8 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('offline', () => {
     console.log('Network lost - switching to offline mode');
   });
+} else {
+  console.info('ℹ️ Service Workers are not supported in this browser/environment. The app will work normally without offline features.');
 }
 
 // تهيئة إعدادات PWA
