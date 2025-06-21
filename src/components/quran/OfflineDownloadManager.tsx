@@ -12,7 +12,9 @@ import {
   HardDrive,
   Wifi,
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  Database,
+  Check
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { offlineStorageService } from "@/services/offline-storage-service";
@@ -41,6 +43,7 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
   const [overallProgress, setOverallProgress] = useState(0);
   const [storageInfo, setStorageInfo] = useState({ used: 0, quota: 0 });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isValidating, setIsValidating] = useState(false);
   
   const { data: chaptersData, isLoading } = useQuranApiChapters();
   const { toast } = useToast();
@@ -62,15 +65,56 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
     if (open) {
       loadDownloadedChapters();
       loadStorageInfo();
+      validateDatabase();
     }
   }, [open]);
+
+  const validateDatabase = async () => {
+    setIsValidating(true);
+    try {
+      const isValid = await offlineStorageService.validateDatabase();
+      if (!isValid) {
+        toast({
+          title: "تحذير",
+          description: "قد تكون هناك مشكلة في قاعدة البيانات المحلية",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('خطأ في التحقق من قاعدة البيانات:', error);
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   const loadDownloadedChapters = async () => {
     try {
       const downloaded = await offlineStorageService.getDownloadedChapters();
+      console.log('السور المحملة:', downloaded);
       setDownloadedChapters(downloaded);
+      
+      // التحقق من صحة البيانات المحملة
+      const validChapters = [];
+      for (const chapterId of downloaded) {
+        const isValid = await offlineStorageService.isChapterDownloaded(chapterId);
+        if (isValid) {
+          validChapters.push(chapterId);
+        }
+      }
+      
+      if (validChapters.length !== downloaded.length) {
+        console.log('تحديث قائمة السور المحملة بعد التحقق');
+        await offlineStorageService.updateDownloadedChapters(validChapters);
+        setDownloadedChapters(validChapters);
+      }
+      
     } catch (error) {
       console.error('خطأ في تحميل قائمة السور المحملة:', error);
+      toast({
+        title: "خطأ",
+        description: "فشل في تحميل قائمة السور المحملة",
+        variant: "destructive"
+      });
     }
   };
 
@@ -145,9 +189,10 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
       await loadStorageInfo();
 
     } catch (error) {
+      console.error('خطأ في التحميل:', error);
       toast({
         title: "خطأ في التحميل",
-        description: "حدث خطأ أثناء تحميل السور",
+        description: "حدث خطأ أثناء تحميل السور. يرجى المحاولة مرة أخرى.",
         variant: "destructive"
       });
     } finally {
@@ -168,6 +213,7 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
         description: "تم حذف السورة من التخزين المحلي",
       });
     } catch (error) {
+      console.error('خطأ في الحذف:', error);
       toast({
         title: "خطأ في الحذف",
         description: "حدث خطأ أثناء حذف السورة",
@@ -187,6 +233,7 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
         description: "تم حذف جميع السور المحملة",
       });
     } catch (error) {
+      console.error('خطأ في المسح:', error);
       toast({
         title: "خطأ في المسح",
         description: "حدث خطأ أثناء مسح البيانات",
@@ -213,12 +260,13 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
           <DialogTitle className="text-right text-xl flex items-center gap-3">
             <Download className="text-blue-500" size={24} />
             إدارة التحميل للاستخدام بدون اتصال
+            {isValidating && <RefreshCw className="animate-spin text-gray-400" size={16} />}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6">
           {/* معلومات الحالة */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
               <CardContent className="p-4 text-center">
                 <div className="flex items-center justify-center gap-2 mb-2">
@@ -252,6 +300,16 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
                   <span className="font-medium">{formatBytes(storageInfo.used)}</span>
                 </div>
                 <p className="text-sm text-gray-600">مساحة مستخدمة</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4 text-center">
+                <div className="flex items-center justify-center gap-2 mb-2">
+                  <Database className="text-purple-500" size={20} />
+                  <span className="font-medium">{chapters.length}</span>
+                </div>
+                <p className="text-sm text-gray-600">إجمالي السور</p>
               </CardContent>
             </Card>
           </div>
@@ -308,6 +366,15 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
             </Button>
             
             <Button
+              onClick={loadDownloadedChapters}
+              variant="outline"
+              disabled={isDownloading}
+            >
+              <RefreshCw size={16} className="ml-2" />
+              تحديث القائمة
+            </Button>
+            
+            <Button
               onClick={handleClearAll}
               variant="destructive"
               disabled={isDownloading || downloadedChapters.length === 0}
@@ -358,7 +425,10 @@ const OfflineDownloadManager: React.FC<OfflineDownloadManagerProps> = ({
                           <div className="flex items-center gap-2">
                             {isDownloaded ? (
                               <>
-                                <CheckCircle className="text-green-500" size={20} />
+                                <div className="flex items-center gap-1 text-green-600">
+                                  <Check size={16} />
+                                  <span className="text-xs">محملة</span>
+                                </div>
                                 <Button
                                   size="sm"
                                   variant="outline"
